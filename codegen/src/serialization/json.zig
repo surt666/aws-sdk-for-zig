@@ -262,15 +262,16 @@ fn writeUnionJson(params: WriteMemberJsonParams, writer: *std.Io.Writer) !void {
                 try writer.print(".{s} => |payload_value| {{\n", .{member.field_name});
                 try writer.print("try jw.objectField(\"{s}\");\n", .{member.json_key});
 
-                const child_params = WriteMemberJsonParams{
-                    .shape_id = member.target,
-                    .field_name = member.field_name,
-                    .field_value = member_value,
-                    .state = state,
-                    .member = member.type_member,
-                };
-
-                try writeMemberJson(child_params, writer);
+                try writeMemberJson(
+                    .{
+                        .shape_id = member.target,
+                        .field_name = member.field_name,
+                        .field_value = member_value,
+                        .state = state.indent(),
+                        .member = member.type_member,
+                    },
+                    writer,
+                );
                 try writer.writeAll("},\n");
             }
 
