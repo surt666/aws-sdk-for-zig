@@ -271,16 +271,24 @@ fn writeUnionJson(params: WriteMemberJsonParams, writer: *std.Io.Writer) !void {
             try writer.print("switch ({s}) {{\n", .{union_value});
 
             for (json_members.items) |member| {
-                // Capture payload value from union variant
-                const payload_capture = try std.fmt.allocPrint(allocator, "{s}_payload", .{member.field_name});
+                // Make payload capture name unique with indent level to avoid shadowing
+                const payload_capture = try std.fmt.allocPrint(allocator, "{s}_payload_{d}", .{member.field_name, state.indent_level});
                 defer allocator.free(payload_capture);
 
                 const member_value = try getMemberValueJson(allocator, payload_capture, member);
                 defer allocator.free(member_value);
 
+                // Check if the payload value is actually used
+                const payload_is_used = !std.mem.eql(u8, member_value, payload_capture);
+
                 // Avoid reserved keywords in switch cases
                 const case_name = avoidReserved(member.field_name);
-                try writer.print(".{s} => |{s}| {{\n", .{case_name, payload_capture});
+                if (payload_is_used) {
+                    try writer.print(".{s} => |{s}| {{\n", .{case_name, payload_capture});
+                } else {
+                    // Don't capture if payload is unused (e.g., for empty/void payloads)
+                    try writer.print(".{s} => {{\n", .{case_name});
+                }
                 try writer.print("try jw.objectField(\"{s}\");\n", .{member.json_key});
 
                 try writeMemberJson(
