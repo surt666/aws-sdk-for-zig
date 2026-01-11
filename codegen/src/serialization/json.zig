@@ -271,22 +271,35 @@ fn writeUnionJson(params: WriteMemberJsonParams, writer: *std.Io.Writer) !void {
             try writer.print("switch ({s}) {{\n", .{union_value});
 
             for (json_members.items) |member| {
+                // Check if the target shape is an empty structure
+                const target_shape_info = try smithy_tools.getShapeInfo(member.target, state.file_state.shapes);
+                const is_empty_structure = blk: {
+                    switch (target_shape_info.shape) {
+                        .structure => |struc| {
+                            if (try getJsonMembers(allocator, target_shape_info.shape, state)) |target_members| {
+                                break :blk target_members.items.len == 0;
+                            }
+                            break :blk struc.members.len == 0;
+                        },
+                        else => break :blk false,
+                    }
+                };
+
                 // Make payload capture name unique with indent level to avoid shadowing
                 const payload_capture = try std.fmt.allocPrint(allocator, "{s}_payload_{d}", .{member.field_name, state.indent_level});
                 defer allocator.free(payload_capture);
 
-                const member_value = try getMemberValueJson(allocator, payload_capture, member);
+                // For union payloads, the capture already contains the value - don't use getMemberValueJson
+                // which would try to access a field on it
+                const member_value = try allocator.dupe(u8, payload_capture);
                 defer allocator.free(member_value);
-
-                // Check if the payload value is actually used
-                const payload_is_used = !std.mem.eql(u8, member_value, payload_capture);
 
                 // Avoid reserved keywords in switch cases
                 const case_name = avoidReserved(member.field_name);
-                if (payload_is_used) {
+                if (!is_empty_structure) {
                     try writer.print(".{s} => |{s}| {{\n", .{case_name, payload_capture});
                 } else {
-                    // Don't capture if payload is unused (e.g., for empty/void payloads)
+                    // Don't capture if payload is unused (e.g., for empty structures)
                     try writer.print(".{s} => {{\n", .{case_name});
                 }
                 try writer.print("try jw.objectField(\"{s}\");\n", .{member.json_key});
