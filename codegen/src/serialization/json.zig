@@ -9,6 +9,21 @@ const Allocator = std.mem.Allocator;
 
 const Shape = smithy_tools.Shape;
 
+fn avoidReserved(name: []const u8) []const u8 {
+    if (std.mem.eql(u8, name, "error")) return "@\"error\"";
+    if (std.mem.eql(u8, name, "return")) return "@\"return\"";
+    if (std.mem.eql(u8, name, "not")) return "@\"not\"";
+    if (std.mem.eql(u8, name, "and")) return "@\"and\"";
+    if (std.mem.eql(u8, name, "or")) return "@\"or\"";
+    if (std.mem.eql(u8, name, "test")) return "@\"test\"";
+    if (std.mem.eql(u8, name, "null")) return "@\"null\"";
+    if (std.mem.eql(u8, name, "export")) return "@\"export\"";
+    if (std.mem.eql(u8, name, "union")) return "@\"union\"";
+    if (std.mem.eql(u8, name, "enum")) return "@\"enum\"";
+    if (std.mem.eql(u8, name, "inline")) return "@\"inline\"";
+    return name;
+}
+
 const JsonMember = struct {
     field_name: []const u8,
     json_key: []const u8,
@@ -256,10 +271,17 @@ fn writeUnionJson(params: WriteMemberJsonParams, writer: *std.Io.Writer) !void {
             try writer.print("switch ({s}) {{\n", .{union_value});
 
             for (json_members.items) |member| {
-                const member_value = try getMemberValueJson(allocator, "payload_value", member);
+                // Use union field access directly instead of capturing to avoid unused capture warnings
+                const field_access = try std.fmt.allocPrint(allocator, "@field({s}, \"{s}\")", .{union_value, member.field_name});
+                defer allocator.free(field_access);
+
+                const member_value = try getMemberValueJson(allocator, field_access, member);
                 defer allocator.free(member_value);
 
-                try writer.print(".{s} => |payload_value| {{\n", .{member.field_name});
+                // Don't capture - member_value already has the full access path
+                // Avoid reserved keywords in switch cases
+                const case_name = avoidReserved(member.field_name);
+                try writer.print(".{s} => {{\n", .{case_name});
                 try writer.print("try jw.objectField(\"{s}\");\n", .{member.json_key});
 
                 try writeMemberJson(

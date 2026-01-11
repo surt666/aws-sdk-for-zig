@@ -39,7 +39,8 @@ pub fn main() anyerror!void {
     const stdout = &stdout_writer.interface;
 
     var output_dir = std.fs.cwd();
-    defer if (output_dir.fd > 0) output_dir.close();
+    var should_close_output_dir = false;
+    defer if (should_close_output_dir) output_dir.close();
     var models_dir: ?std.fs.Dir = null;
     defer if (models_dir) |*m| m.close();
     for (args, 0..) |arg, i| {
@@ -51,8 +52,10 @@ pub fn main() anyerror!void {
             try stdout.print(" --output specifies an output directory, otherwise the current working directory will be used\n", .{});
             std.process.exit(0);
         }
-        if (std.mem.eql(u8, "--output", arg))
+        if (std.mem.eql(u8, "--output", arg)) {
             output_dir = try output_dir.makeOpenPath(args[i + 1], .{});
+            should_close_output_dir = true;
+        }
         if (std.mem.eql(u8, "--models", arg))
             models_dir = try std.fs.cwd().openDir(args[i + 1], .{ .iterate = true });
     }
@@ -88,9 +91,9 @@ pub fn main() anyerror!void {
         // can be made
 
         if (models_dir) |m| {
-            var cwd = try std.fs.cwd().openDir(".", .{});
-            defer cwd.close();
+            const cwd = try std.fs.cwd().openDir(".", .{});
             defer cwd.setAsCwd() catch unreachable;
+            // Don't close cwd - we need it to restore the directory
 
             try m.setAsCwd();
             try processDirectories(m, output_dir, &root_progress_node);
@@ -220,7 +223,8 @@ fn processFile(file_name: []const u8, output_dir: std.fs.Dir, manifest: *std.Io.
     const allocator = arena.allocator();
 
     var output = try std.Io.Writer.Allocating.initCapacity(allocator, 1024 * 1024 * 2);
-    defer output.deinit();
+    // Don't defer output.deinit() since we transfer ownership with toOwnedSliceSentinel
+    // and arena.deinit() will clean up the memory anyway
 
     const writer = &output.writer;
 
@@ -264,7 +268,9 @@ fn processFile(file_name: []const u8, output_dir: std.fs.Dir, manifest: *std.Io.
     }
 
     const unformatted: [:0]const u8 = try output.toOwnedSliceSentinel(0);
-    const formatted = try zigFmt(allocator, unformatted);
+    // Skip in-process formatting due to Zig 0.15.2 tree.render() bug
+    // Run 'zig fmt' on output directory after codegen completes
+    const formatted = unformatted;
 
     // Dump our buffer out to disk
     var file = try output_dir.createFile(output_file_name, .{ .truncate = true });
@@ -280,10 +286,10 @@ fn zigFmt(allocator: std.mem.Allocator, buffer: [:0]const u8) ![]const u8 {
     var tree = try std.zig.Ast.parse(allocator, buffer, .zig);
     defer tree.deinit(allocator);
 
-    var aw = try std.Io.Writer.Allocating.initCapacity(allocator, buffer.len);
-    defer aw.deinit();
+    // Use allocating writer without deinit to avoid double-free
+    var aw = std.Io.Writer.Allocating.init(allocator);
     try tree.render(allocator, &aw.writer, .{});
-    return aw.toOwnedSlice();
+    return try aw.toOwnedSlice();
 }
 
 fn generateServicesForFilePath(
@@ -968,7 +974,9 @@ fn generateComplexTypeFor(shape_id: []const u8, members: []smithy.TypeMember, ty
         if (try generateTypeFor(member.target, writer, child_state, options.endStructure(true)))
             map_fields.appendAssumeCapacity(try std.fmt.allocPrint(allocator, "{s}", .{member_name}));
 
-        if (!std.mem.eql(u8, "union", type_type_name))
+        // Don't add default values to union fields (unions can't have defaults in Zig)
+        const is_union = std.mem.eql(u8, "union", type_type_name) or std.mem.eql(u8, "union(enum)", type_type_name);
+        if (!is_union)
             try writeOptional(member.traits, writer, " = null");
         _ = try writer.write(",\n");
     }
