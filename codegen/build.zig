@@ -3,7 +3,7 @@ const std = @import("std");
 // Although this function looks imperative, note that its job is to
 // declaratively construct a build graph that will be executed by an external
 // runner.
-pub fn build(b: *std.build.Builder) !void {
+pub fn build(b: *std.Build) !void {
     // Standard target options allows the person running `zig build` to choose
     // what target to build for. Here we do not override the defaults, which
     // means any target is allowed, and the default is native. Other options
@@ -15,18 +15,27 @@ pub fn build(b: *std.build.Builder) !void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
-    const exe = b.addExecutable(.{
-        .name = "codegen",
-        .root_source_file = .{ .path = "src/main.zig" },
-        .target = target,
-        .optimize = optimize,
-    });
-
     const smithy_dep = b.dependency("smithy", .{
         .target = target,
         .optimize = optimize,
     });
-    exe.addModule("smithy", smithy_dep.module("smithy"));
+    const case_dep = b.dependency("case", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const exe_mod = b.createModule(.{
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    exe_mod.addImport("smithy", smithy_dep.module("smithy"));
+    exe_mod.addImport("case", case_dep.module("case"));
+
+    const exe = b.addExecutable(.{
+        .name = "codegen",
+        .root_module = exe_mod,
+    });
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
@@ -58,10 +67,16 @@ pub fn build(b: *std.build.Builder) !void {
 
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
-    const unit_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/main.zig" },
+    const test_mod = b.createModule(.{
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
+    });
+    test_mod.addImport("smithy", smithy_dep.module("smithy"));
+    test_mod.addImport("case", case_dep.module("case"));
+
+    const unit_tests = b.addTest(.{
+        .root_module = test_mod,
     });
 
     const run_unit_tests = b.addRunArtifact(unit_tests);

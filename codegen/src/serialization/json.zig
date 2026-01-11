@@ -221,6 +221,71 @@ fn writeStructureJson(params: WriteMemberJsonParams, writer: *std.Io.Writer) !vo
     }
 }
 
+fn writeUnionJson(params: WriteMemberJsonParams, writer: *std.Io.Writer) !void {
+    const shape_type = "union";
+    const allocator = params.state.allocator;
+    const state = params.state;
+
+    const shape_info = try smithy_tools.getShapeInfo(params.shape_id, state.file_state.shapes);
+    const shape = shape_info.shape;
+
+    const union_name = try std.fmt.allocPrint(params.state.allocator, "{s}_{s}_{d}", .{ params.field_name, shape_type, state.indent_level });
+    defer params.state.allocator.free(union_name);
+
+    const union_value_capture = try std.fmt.allocPrint(allocator, "{s}_capture", .{union_name});
+    defer allocator.free(union_value_capture);
+
+    try writer.print("\n// start {s}: {s}\n", .{ shape_type, union_name });
+    defer writer.print("// end {s}: {s}\n", .{ shape_type, union_name }) catch std.debug.panic("Unreachable", .{});
+
+    if (try getJsonMembers(allocator, shape, state)) |json_members| {
+        if (json_members.items.len > 0) {
+            const is_optional = smithy_tools.shapeIsOptional(params.member.traits);
+
+            var union_value = params.field_value;
+
+            if (is_optional) {
+                union_value = union_value_capture;
+
+                try writer.print("if ({s}) |{s}|", .{ params.field_value, union_value_capture });
+                try writer.writeAll("{\n");
+            }
+
+            // For tagged unions, we use switch to handle each variant
+            try writer.writeAll("try jw.beginObject();\n");
+            try writer.print("switch ({s}) {{\n", .{union_value});
+
+            for (json_members.items) |member| {
+                const member_value = try getMemberValueJson(allocator, "payload_value", member);
+                defer allocator.free(member_value);
+
+                try writer.print(".{s} => |payload_value| {{\n", .{member.field_name});
+                try writer.print("try jw.objectField(\"{s}\");\n", .{member.json_key});
+
+                const child_params = WriteMemberJsonParams{
+                    .shape_id = member.target,
+                    .field_name = member.field_name,
+                    .field_value = member_value,
+                    .state = state,
+                    .member = member.type_member,
+                };
+
+                try writeMemberJson(child_params, writer);
+                try writer.writeAll("},\n");
+            }
+
+            try writer.writeAll("}\n");
+            try writer.writeAll("try jw.endObject();\n");
+
+            if (is_optional) {
+                try writer.writeAll("} else {\n");
+                try writer.writeAll("try jw.write(null);\n");
+                try writer.writeAll("}\n");
+            }
+        }
+    }
+}
+
 fn writeListJson(list: smithy_tools.ListShape, params: WriteMemberJsonParams, writer: *std.Io.Writer) anyerror!void {
     const state = params.state;
     const allocator = state.allocator;
@@ -369,7 +434,8 @@ fn writeMemberJson(params: WriteMemberJsonParams, writer: *std.Io.Writer) anyerr
     defer state.popFromTypeStack();
 
     switch (shape) {
-        .structure, .uniontype => try writeStructureJson(params, writer),
+        .structure => try writeStructureJson(params, writer),
+        .uniontype => try writeUnionJson(params, writer),
         .list => |l| try writeListJson(l, params, writer),
         .map => |m| try writeMapJson(m, params, writer),
         .timestamp => try writeScalarJson("timestamp", params, writer),

@@ -816,7 +816,7 @@ fn generateTypeFor(shape_id: []const u8, writer: *std.Io.Writer, state: Generati
         },
         .uniontype => {
             if (!try reuseCommonType(shape_info, writer, state)) {
-                try generateComplexTypeFor(shape_id, shape.uniontype.members, "union", writer, state, options);
+                try generateComplexTypeFor(shape_id, shape.uniontype.members, "union(enum)", writer, state, options);
                 // epilog
                 try outputIndent(state, writer);
                 _ = try writer.write("}");
