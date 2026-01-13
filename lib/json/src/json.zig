@@ -14,6 +14,44 @@ const testing = std.testing;
 const mem = std.mem;
 const maxInt = std.math.maxInt;
 
+pub const ParseError = error{
+    AllocatorRequired,
+    DuplicateJSONField,
+    InvalidCharacter,
+    InvalidControlCharacter,
+    InvalidEnumTag,
+    InvalidEscapeCharacter,
+    InvalidFormat,
+    InvalidISO8601,
+    InvalidLiteral,
+    InvalidNumber,
+    InvalidSeparator,
+    InvalidTopLevel,
+    InvalidTopLevelTrailing,
+    InvalidUnicodeHexSymbol,
+    InvalidUtf,
+    InvalidUtf8Byte,
+    InvalidValueBegin,
+    InvalidValueEnd,
+    MissingField,
+    NoUnionMembersMatched,
+    OutOfMemory,
+    Overflow,
+    SkipZigTest,
+    TooManyClosingItems,
+    TooManyNestedItems,
+    UnbalancedBraces,
+    UnbalancedBrackets,
+    UnexpectedClosingBrace,
+    UnexpectedClosingBracket,
+    UnexpectedEndOfJson,
+    UnexpectedJsonDepth,
+    UnexpectedToken,
+    UnexpectedValue,
+    UnhandledFormat,
+    UnknownField,
+};
+
 pub fn serializeMap(map: anytype, key: []const u8, options: anytype, out_stream: anytype) !void {
     if (@typeInfo(@TypeOf(map)) == .optional) {
         if (map) |m| serializeMapInternal(m, key, options, out_stream);
@@ -1538,7 +1576,7 @@ fn skipValue(tokens: *TokenStream) SkipValueError!void {
     }
 }
 
-fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: ParseOptions) !T {
+fn parseInternal(comptime T: type, token: Token, tokens: *TokenStream, options: ParseOptions) ParseError!T {
     switch (@typeInfo(T)) {
         .bool => {
             return switch (token) {
@@ -1884,7 +1922,7 @@ fn isMapPattern(comptime T: type) bool {
     return key_found and value_found;
 }
 
-pub fn parse(comptime T: type, tokens: *TokenStream, options: ParseOptions) !T {
+pub fn parse(comptime T: type, tokens: *TokenStream, options: ParseOptions) ParseError!T {
     // std.log.debug("parsing {s} into type {s}", .{ tokens.slice, @typeName(T) });
     const token = (try tokens.next()) orelse return error.UnexpectedEndOfJson;
     return parseInternal(T, token, tokens, options);
